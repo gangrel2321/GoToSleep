@@ -1,135 +1,57 @@
-import os
-import platform
-from typing import Dict, List, Tuple, overload
-import schedule
-import logging
-from datetime import datetime
-from dataclasses import dataclass, field
-from abc import ABC
+from typing import List,Optional
+from time import sleep
+from datetime import datetime, time
+from .command import CommandUtilities, Command  # add
+from .shutdown import Shutdown
+from .disableWifi import DisableWifi
 
+# @repeat(every().day.at("13:30"))
+def equal_time(time1 : time, time2 : time) -> bool:
+    # checks time equality to the minute
+    return time1.hour == time2.hour and time1.minute == time2.minute
 
-#@repeat(every().day.at("13:30"))
-class TaskFactory():
-    def __init__(self) -> None:
-        self._builders : Dict[str,TaskBuilder] = {}
-    
-    def register_builder(self, key : str, builder : TaskBuilder) -> None:
-        self._builders[key] = builder
+def example_run():
+    os_name = CommandUtilities.detect_os()
+    sched_time = time(16,30) # 16:30
+    shutdown_task = Task("Shutdown", Shutdown(),sched_time,os_name)
+    no_wifi_task = Task("DisableInternet", DisableWifi(),time(16,20),os_name)
+    tr = TaskRunner()
+    tr.add_task(shutdown_task)
+    while True:
+        tr.check_tasks()
+        sleep(20) # sleep 20 seconds 
 
-    def get_builders(self) -> List[str]:
-        return list(self._builders.keys())
+class Task:
+    # sequence of commands with a schedule
+    def __init__(self, name: str, cmd: Optional[Command] = None, sched: Optional[time] = None, os_name: Optional[str] = None) -> None:
+        self.cmd: Optional[Command] = cmd
+        self.sched: Optional[time] = sched
+        self.os_name: Optional[str] = os_name        
+        self.task_name: str = name
 
-class TaskBuilder(ABC):
-    def __init__(self) -> None:
-        pass
+    def execute(self): # run cmd seq
+        self.cmd.execute()
 
-class WindowsBuilder(TaskBuilder):
-    def __init__(self):
-        pass
+#want to execute Task objects but task objects have commands which depend on operating system (so factory for commands not task?)
 
-class LinuxBuilder(TaskBuilder):
-    def __init__(self) -> None:
-        pass 
+class TaskRunner:
 
-class MacBuilder(TaskBuilder):
-    def __init__(self) -> None:
-        pass
-
-class Task():
-    def __init__(self) -> None:
-        self.factory = TaskFactory()
-        self.factory.register_builder("WINDOWS", WindowsBuilder())
-        self.factory.register_builder("LINUX",LinuxBuilder())
-        self.factory.register_builder("MAC",MacBuilder())
-
-    def create_task(self, os, cmd : Command):
-        pass
-
-
-# get OS and run a shutdown command
-
-class CommandArgs:    
-    '''
-        "Frozen" list data structure, all values are either frozen or
-        variable and allows you to modify non-frozen values. Non-frozen
-        values also have associated labels. 
-        NOTE: Not optimized for extremely long commands 
-    '''
-    def __init__(self, cmd_string : str, frozen_args : List[int] = [], labels : List[str] = []) -> None:
-        self._storage : List[Tuple[str,bool]] = self._process_cmd_string(cmd_string, frozen_args)
-        self._labels : Dict[str, int] = self._process_labels(labels)
-
-    def _process_cmd_string(self, cmd_string : str, frozen_args : List[int]) -> List[Tuple[str, bool]]:
-        string_list : List[str] = cmd_string.split(" ")
-        result = [(string_list[i], True) if i in frozen_args else (string_list[i], False) for i in range(len(string_list))]
-        return result 
-    
-    def _process_labels(self, labels : List[str]) -> Dict[str, int]:
-        result : Dict[str,int] = {}
-        for i in range(len(self._storage)):
-            if not self._is_frozen(i):
-                result[labels[0]] = i
-                labels.pop(0)
-                if not len(labels):
-                    break
-        return result
-    
-    def _set_label(self, label : str, key : int) -> None:
-        if self._is_frozen(key):
-            raise ValueError("Cannot label frozen key")
-        else:
-            self._labels[label] = key
-
-    def _is_frozen(self, key : int) -> bool:
-        return self._storage[key][1]
-
-    def __getitem__(self, key : int) -> str:
-        return self._storage[key][0]
-    
-    @overload
-    def __setitem__(self, key : int, value : str) -> None:
-        if self._is_frozen(key):
-            raise ValueError("Cannot set frozen key")
-        else:
-            self._storage[key][0] = value
-
-    @overload
-    def __setitem__(self, label : str, value : str) -> None:
-        key : int = self._labels[label]
-        self[key] = value
-
-    def cmd(self) -> str:
-        return 
-
-class ShutdownArgs(CommandArgs):
-    def __init__(self) -> None:
-        super(ShutdownArgs, self).__init__()
-
-
-
-
-@dataclass(eq=False)
-class Command:
-    cmd_map : Dict[str, str] = {}
-
-@dataclass(eq=False)
-class Shutdown(Command):
-    cmd_map : Dict[str, str] = {
-        "WINDOWS" : "shudown /s /t 1",
-        "LINUX" : "",
-        "MAC" : ""
-    }
-
-    def execute(self):
-        pass
+    def __init__(self, tasks : List[Task] = []):
+        self.tasks = tasks
+        for task in self.tasks:
+            task.initialize()
         
+    def add_task(self, task : Task):
+        self.tasks.append(task)
+        task.initialize() 
 
-os_name : str = platform.system()
+    def check_tasks(self):
+        cur_time : time = datetime.now().time()
+        for task in self.tasks:
+            if equal_time(task.sched, cur_time):
+                task.execute()
 
-if os_name == 'Windows': # windows 
-    os.system('shutdown /s /t 1')
-elif os_name == 'Linux' or os_name == 'Darwin': # linux & mac
-    os.system('sudo shutdown now')
-else:
-    raise RuntimeError("Unsupported OS.")
+
+
+
 
